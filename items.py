@@ -21,8 +21,10 @@ def fetch_ddragon_items(version: str, value: Any = None) -> dict[str, Any]:
     item_data = utils.fetch_json(url, {})
 
     if not item_data or item_data.get("version") != version or "data" not in item_data:
-        logging.warning(f"Failed to fetch data for all items from Data Dragon, version {version}")
+        logging.warning(f"Failed to fetch data for all items from Data Dragon (v{version}).")
         return value
+    
+    return item_data
 
 def clean_ddragon_items(ddragon: dict[str, Any]) -> dict[str, Any]:
     """
@@ -35,7 +37,7 @@ def clean_ddragon_items(ddragon: dict[str, Any]) -> dict[str, Any]:
     :rtype: dict[str, Any]
     """
     if not ddragon or not isinstance(ddragon.get("data"), dict):
-        logging.warning("Invalid item data received")
+        logging.warning("Invalid item data received from `fetch_ddragon_items`.")
         return {}
     
     ddragon = ddragon["data"]
@@ -98,7 +100,7 @@ def fetch_cdragon_items(version: str, value: Any = None) -> dict[str, Any]:
     item_data = utils.fetch_json(url, {})
 
     if not item_data:
-        logging.warning(f"Failed to fetch data for all items from Community Dragon, version {version}")
+        logging.warning(f"Failed to fetch data for all items from Community Dragon (v{version}).")
         return value
     
     return item_data
@@ -114,11 +116,14 @@ def clean_cdragon_items(cdragon: dict[str, Any]) -> dict[str, Any]:
     :rtype: dict[str, Any]
     """
     if not cdragon:
-        logging.warning("Invalid item data received.")
+        logging.warning("Invalid item data received from `fetch_cdragon_items`.")
         return {}
 
     filtered_data = {}
     for item_id, subdata in cdragon.items():
+        if not isinstance(subdata, dict):
+            continue
+        
         base_keys = set(subdata.keys()).intersection(SAVE_KEYS)
         filtered_keys = set(subdata.keys()).difference(REMOVE_KEYS)
         stat_keys = filtered_keys.difference(SAVE_KEYS)
@@ -183,15 +188,68 @@ def merge_items(ddragon: dict[str, Any], cdragon: dict[str, Any]) -> dict[str, A
     
     return item_data
 
-def create_item_list(item_data: dict[str, Any]) -> dict[str, Any]:
+def check_items(filename: str, version: str, update: bool = False) -> dict[str, Any]:
     """
-    Create an item list for debugging purposes.
+    Check if the item data file is correct, and update if not.
+
+    :param filename: The item data file to read.
+    :type filename: str
+
+    :param version: The game version.
+    :type version: str
+
+    :param update: Debug flag to force update item data (defaults to `False`).
+    :type update: bool
+
+    :return: Combined item data from Data Dragon and Community Dragon.
+    :rtype: dict[str, Any]
     """
-    if not isinstance(item_data, dict):
-        logging.warning(f"Invalid or empty item data received: item_data = {type(item_data).__name__}")
-        return {}
+    item_data = utils.read_json(filename, {})
+
+    if not item_data or update:
+        logging.info(f"Fetching item data (version {version}).")
+        ddragon = fetch_ddragon_items(version, {})
+        ddragon = clean_ddragon_items(ddragon)
+
+        cdragon = fetch_cdragon_items(version, {})
+        cdragon = clean_cdragon_items(cdragon)
+        
+        item_data = merge_items(ddragon, cdragon)
+        utils.write_json(filename, item_data)
     
-    return {
-        item_id: subdata.get("name", "")
-        for item_id, subdata in item_data.items()
-    }
+    return item_data
+
+def check_item_list(filename_list: str, filename_data: str, version: str, update: bool = False) -> dict[str, Any]:
+    """
+    Check if the item list file is correct, and update if not.
+
+    :param filename_list: The item list file to read.
+    :type filename: str
+
+    :param filename_data: The item data file to read if the item list file is invalid.
+    :type filename_data: str
+
+    :version: The game version.
+    :type version: str
+
+    :param update: Debug flag to force update item list (defaults to `False`).
+    :type update: bool
+
+    :return: Item list.
+    :rtype: dict[str, Any]
+    """
+    item_list = utils.read_json(filename_list, {})
+
+    if not item_list or update:
+        logging.info(f"Fetching item list (version {version}).")
+        item_list = utils.read_json(filename_data, {})
+        item_list = {
+            item_id: subdata.get("name", "")
+            for item_id, subdata in item_list.items()
+        }
+        if not item_list:
+            logging.warning(f"Invalid or empty data received from {filename_data}.")
+            return {}
+        utils.write_json(filename_list, item_list)
+    
+    return item_list
